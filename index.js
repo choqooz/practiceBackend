@@ -1,137 +1,18 @@
-const express = require('express');
-const app = express();
-const morgan = require('morgan');
-const cors = require('cors');
-const Phonebook = require('./models/phonebook');
+const mongoose = require('mongoose');
+const config = require('./utils/config');
+const app = require('./app');
+const logger = require('./utils/logger');
 
-app.use(express.json());
-app.use(cors());
-app.use(express.static('dist'));
-
-app.use(
-  morgan((tokens, req, res) => {
-    return [
-      tokens.method(req, res),
-      tokens.url(req, res),
-      tokens.status(req, res),
-      tokens.res(req, res, 'content-length'),
-      '-',
-      tokens['response-time'](req, res),
-      'ms',
-      JSON.stringify(req.body),
-    ].join(' ');
-  })
-);
-
-app.get('/', (request, response) => {
-  response.send('<h1>Hello World!</h1>');
-});
-
-app.get('/api/persons', (request, response) => {
-  Phonebook.find({}).then((result) => {
-    response.json(result);
-  });
-});
-
-app.get('/api/persons/:id', (request, response, next) => {
-  const id = request.params.id;
-  Phonebook.findById(id)
-    .then((note) => {
-      if (note) {
-        response.json(note);
-      } else {
-        response.status(404).end();
-      }
-    })
-    .catch((error) => {
-      next(error);
-    });
-});
-
-app.delete('/api/persons/:id', (request, response) => {
-  const id = request.params.id;
-
-  Phonebook.findByIdAndDelete(id)
+if (process.env.NODE_ENV !== 'test') {
+  mongoose
+    .connect(config.MONGODB_URI)
     .then(() => {
-      response.status(204).end();
+      logger.info('Connected to MongoDB');
+      app.listen(config.PORT, () => {
+        logger.info(`Server running on port ${config.PORT}`);
+      });
     })
     .catch((error) => {
-      next(error);
+      logger.error('Error connecting to MongoDB:', error.message);
     });
-});
-
-app.post('/api/persons', async (request, response, next) => {
-  const body = request.body;
-
-  if (!body.name || !body.number) {
-    return response.status(400).json({ error: 'content missing' });
-  }
-
-  try {
-    const existingPerson = await Phonebook.findOne({ name: body.name });
-
-    if (existingPerson) {
-      const updatedNote = await Phonebook.findOneAndUpdate(
-        { name: body.name },
-        { number: body.number },
-        { new: true }
-      );
-      return response.json(updatedNote);
-    } else {
-      const note = new Phonebook({
-        name: body.name,
-        number: body.number,
-      });
-
-      const savedNote = await note.save();
-      response.json(savedNote);
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.put('/api/persons/:id', (request, response, next) => {
-  const body = request.body;
-  const id = request.params.id;
-
-  const note = {
-    name: body.name,
-    number: body.number,
-  };
-
-  Phonebook.findByIdAndUpdate(id, note, {
-    new: true,
-    runValidators: true,
-    context: 'query',
-  })
-    .then((updatedNote) => {
-      response.json(updatedNote);
-    })
-    .catch((error) => next(error));
-});
-
-const unknownEndpoint = (request, response) => {
-  response.status(404).send({ error: 'unknown endpoint' });
-};
-app.use(unknownEndpoint);
-
-const errorHandler = (error, request, response, next) => {
-  console.error(error.message);
-
-  if (error.name === 'CastError') {
-    return response.status(400).send({ error: 'malformatted id' });
-  } else if (error.name === 'ValidationError') {
-    return response.status(400).json({ error: error.message });
-  }
-
-  next(error);
-};
-
-// este debe ser el último middleware cargado, ¡también todas las rutas deben ser registrada antes que esto!
-app.use(errorHandler);
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+}
